@@ -35,30 +35,6 @@ TRAIN_TIME = 34
 EPOCHS = 5
 
 
-# ================= CLASS WEIGHT =================
-def compute_class_weight(labels_by_time, train_time):
-
-    fraud = 0
-    normal = 0
-
-    for t, pairs in labels_by_time.items():
-        if t > train_time:
-            continue
-        for _, y in pairs:
-            if y == 1:
-                fraud += 1
-            else:
-                normal += 1
-
-    print("Train fraud:", fraud, "normal:", normal)
-
-    weight = normal / max(fraud, 1)
-    return torch.tensor([weight], dtype=torch.float)
-
-
-#pos_weight = compute_class_weight(labels_by_time, TRAIN_TIME)
-print("Fraud weight:", pos_weight.item())
-
 
 # ================= TRAINING =================
 for epoch in range(EPOCHS):
