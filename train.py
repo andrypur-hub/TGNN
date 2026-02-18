@@ -9,6 +9,8 @@ from model.memory import NodeMemory
 from model.tgnn import TGNN
 from model.node_classifier import NodeClassifier
 from model.evaluator import Evaluator
+from model.loss import FocalLoss
+
 
 
 # ================= DATA =================
@@ -54,7 +56,7 @@ def compute_class_weight(labels_by_time, train_time):
     return torch.tensor([weight], dtype=torch.float)
 
 
-pos_weight = compute_class_weight(labels_by_time, TRAIN_TIME)
+#pos_weight = compute_class_weight(labels_by_time, TRAIN_TIME)
 print("Fraud weight:", pos_weight.item())
 
 
@@ -92,7 +94,8 @@ for epoch in range(EPOCHS):
         logits = classifier(h).squeeze()
         y = torch.tensor(labels, dtype=torch.float)
 
-        loss = F.binary_cross_entropy_with_logits(logits, y, pos_weight=pos_weight)
+        #loss = F.binary_cross_entropy_with_logits(logits, y, pos_weight=pos_weight)
+        loss = criterion(logits, y)
 
         optimizer.zero_grad()
         loss.backward()
@@ -102,6 +105,7 @@ for epoch in range(EPOCHS):
         steps += 1
 
     print(f"Epoch {epoch+1}/{EPOCHS} Train Loss: {total_loss/steps:.4f}")
+    criterion = FocalLoss(alpha=0.75, gamma=2.0)
 
 
 # ================= TEST FUTURE =================
