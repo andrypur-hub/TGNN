@@ -2,7 +2,6 @@ import sys, os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import torch
-import torch.nn.functional as F
 
 from data.loader.elliptic_loader import load_elliptic_events
 from model.memory import NodeMemory
@@ -10,7 +9,7 @@ from model.tgnn import TGNN
 from model.node_classifier import NodeClassifier
 from model.evaluator import Evaluator
 from model.loss import FocalLoss
-
+from graph.neighborhood import NeighborFinder
 
 
 # ================= DATA =================
@@ -25,6 +24,7 @@ DIM = 64
 tgnn = TGNN(DIM)
 memory = NodeMemory(n_nodes, DIM)
 classifier = NodeClassifier(DIM)
+neighbors = NeighborFinder()
 
 optimizer = torch.optim.Adam(
     list(tgnn.parameters()) + list(classifier.parameters()),
@@ -37,8 +37,7 @@ TRAIN_TIME = 34
 EPOCHS = 5
 
 
-
-# ================= TRAINING =================
+# ================= TRAIN =================
 for epoch in range(EPOCHS):
 
     total_loss = 0
@@ -48,18 +47,35 @@ for epoch in range(EPOCHS):
 
         events = events_by_time[t]
 
-        # update memory always
+        # ---------- ingest transactions ----------
         for e in events:
+
             hu = memory.get([e.src])
             hv = memory.get([e.dst])
+
+            nu = neighbors.get_neighbors(e.src)
+            nv = neighbors.get_neighbors(e.dst)
+
+            if len(nu) > 0:
+                neigh_u = memory.get(nu).mean(dim=0, keepdim=True)
+            else:
+                neigh_u = torch.zeros_like(hu)
+
+            if len(nv) > 0:
+                neigh_v = memory.get(nv).mean(dim=0, keepdim=True)
+            else:
+                neigh_v = torch.zeros_like(hv)
+
             x = torch.tensor([[e.x[0]]], dtype=torch.float)
 
-            hu_new, hv_new, _ = tgnn(hu, hv, x)
+            hu_new, hv_new, _ = tgnn(hu, hv, neigh_u, neigh_v, x)
 
             memory.update([e.src], hu_new)
             memory.update([e.dst], hv_new)
 
-        # train only past
+            neighbors.add_edge(e.src, e.dst)
+
+        # ---------- training only past ----------
         if t > TRAIN_TIME:
             continue
 
@@ -72,7 +88,6 @@ for epoch in range(EPOCHS):
         logits = classifier(h).squeeze()
         y = torch.tensor(labels, dtype=torch.float)
 
-        #loss = F.binary_cross_entropy_with_logits(logits, y, pos_weight=pos_weight)
         loss = criterion(logits, y)
 
         optimizer.zero_grad()
@@ -83,9 +98,9 @@ for epoch in range(EPOCHS):
         steps += 1
 
     print(f"Epoch {epoch+1}/{EPOCHS} Train Loss: {total_loss/steps:.4f}")
-   
 
-# ================= TEST FUTURE =================
+
+# ================= TEST =================
 print("\n===== EVALUATION ON FUTURE GRAPH =====")
 
 evaluator = Evaluator()
@@ -96,13 +111,32 @@ for t in sorted(events_by_time.keys()):
 
     # graph tetap berkembang
     for e in events:
+
         hu = memory.get([e.src])
         hv = memory.get([e.dst])
+
+        nu = neighbors.get_neighbors(e.src)
+        nv = neighbors.get_neighbors(e.dst)
+
+        if len(nu) > 0:
+            neigh_u = memory.get(nu).mean(dim=0, keepdim=True)
+        else:
+            neigh_u = torch.zeros_like(hu)
+
+        if len(nv) > 0:
+            neigh_v = memory.get(nv).mean(dim=0, keepdim=True)
+        else:
+            neigh_v = torch.zeros_like(hv)
+
         x = torch.tensor([[e.x[0]]], dtype=torch.float)
 
-        hu_new, hv_new, _ = tgnn(hu, hv, x)
+        with torch.no_grad():
+            hu_new, hv_new, _ = tgnn(hu, hv, neigh_u, neigh_v, x)
+
         memory.update([e.src], hu_new)
         memory.update([e.dst], hv_new)
+
+        neighbors.add_edge(e.src, e.dst)
 
     # evaluasi hanya masa depan
     if t <= TRAIN_TIME:
