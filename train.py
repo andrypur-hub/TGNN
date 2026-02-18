@@ -11,11 +11,14 @@ from model.node_classifier import NodeClassifier
 from model.evaluator import Evaluator
 
 
-DATA_PATH = "/content/drive/MyDrive/ProjectPython/TGNN/Dataset/elliptic_bitcoin_dataset"
+# ================= DATA =================
+DATA_PATH = "/content/drive/MyDrive/Datasets/elliptic_bitcoin_dataset"
 
 print("Loading Elliptic dataset...")
 events_by_time, labels_by_time, n_nodes = load_elliptic_events(DATA_PATH)
 
+
+# ================= MODEL =================
 DIM = 64
 tgnn = TGNN(DIM)
 memory = NodeMemory(n_nodes, DIM)
@@ -29,25 +32,8 @@ optimizer = torch.optim.Adam(
 TRAIN_TIME = 34
 EPOCHS = 5
 
-DIM = 64
-tgnn = TGNN(DIM)
-memory = NodeMemory(n_nodes, DIM)
-classifier = NodeClassifier(DIM)
 
-optimizer = torch.optim.Adam(
-    list(tgnn.parameters()) + list(classifier.parameters()),
-    lr=1e-3
-)
-
-# ====== CLASS IMBALANCE HANDLING ======
-pos_weight = compute_class_weight(labels_by_time, TRAIN_TIME)
-print("Fraud weight:", pos_weight.item())
-
-
-# =========================
-# Cost Sensitive
-# =========================
-
+# ================= CLASS WEIGHT =================
 def compute_class_weight(labels_by_time, train_time):
 
     fraud = 0
@@ -68,10 +54,11 @@ def compute_class_weight(labels_by_time, train_time):
     return torch.tensor([weight], dtype=torch.float)
 
 
+pos_weight = compute_class_weight(labels_by_time, TRAIN_TIME)
+print("Fraud weight:", pos_weight.item())
 
-# =========================
-# TRAINING (PAST)
-# =========================
+
+# ================= TRAINING =================
 for epoch in range(EPOCHS):
 
     total_loss = 0
@@ -81,7 +68,7 @@ for epoch in range(EPOCHS):
 
         events = events_by_time[t]
 
-        # ingest always
+        # update memory always
         for e in events:
             hu = memory.get([e.src])
             hv = memory.get([e.dst])
@@ -92,7 +79,7 @@ for epoch in range(EPOCHS):
             memory.update([e.src], hu_new)
             memory.update([e.dst], hv_new)
 
-        # TRAIN only past
+        # train only past
         if t > TRAIN_TIME:
             continue
 
@@ -107,7 +94,6 @@ for epoch in range(EPOCHS):
 
         loss = F.binary_cross_entropy_with_logits(logits, y, pos_weight=pos_weight)
 
-
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -118,9 +104,7 @@ for epoch in range(EPOCHS):
     print(f"Epoch {epoch+1}/{EPOCHS} Train Loss: {total_loss/steps:.4f}")
 
 
-# =========================
-# TEST (FUTURE PREDICTION)
-# =========================
+# ================= TEST FUTURE =================
 print("\n===== EVALUATION ON FUTURE GRAPH =====")
 
 evaluator = Evaluator()
@@ -129,7 +113,7 @@ for t in sorted(events_by_time.keys()):
 
     events = events_by_time[t]
 
-    # memory still evolves
+    # graph tetap berkembang
     for e in events:
         hu = memory.get([e.src])
         hv = memory.get([e.dst])
@@ -139,7 +123,7 @@ for t in sorted(events_by_time.keys()):
         memory.update([e.src], hu_new)
         memory.update([e.dst], hv_new)
 
-    # evaluate only future
+    # evaluasi hanya masa depan
     if t <= TRAIN_TIME:
         continue
 
