@@ -15,8 +15,7 @@ def load_elliptic_events(path):
     feat = feat.rename(columns={0:"txId",1:"time"})
     nodes = feat.merge(cls, on="txId", how="left")
 
-    nodes["class"] = nodes["class"].replace("unknown", None)
-    nodes = nodes.dropna(subset=["class"])
+    nodes["class"] = nodes["class"].replace("unknown", -1)
     nodes["class"] = nodes["class"].astype(int)
 
 
