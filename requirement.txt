@@ -1,8 +1,6 @@
 torch
 pandas
 numpy
-scikit-learn
 tqdm
-networkx
-matplotlib
-kaggle
+scikit-learn
+
