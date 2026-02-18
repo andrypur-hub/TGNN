@@ -12,7 +12,7 @@ from model.tgnn import TGNN
 
 print("Loading Elliptic dataset...")
 
-events, n_nodes = load_elliptic_events("/content/elliptic_bitcoin_dataset")
+events, n_nodes = load_elliptic_events("/elliptic_bitcoin_dataset")
 
 DIM = 64
 model = TGNN(DIM)
