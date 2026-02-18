@@ -15,8 +15,10 @@ def load_elliptic_events(path):
     feat = feat.rename(columns={0:"txId",1:"time"})
     nodes = feat.merge(cls, on="txId", how="left")
 
-    nodes["class"] = nodes["class"].replace("unknown","2")
+    nodes["class"] = nodes["class"].replace("unknown", None)
+    nodes = nodes.dropna(subset=["class"])
     nodes["class"] = nodes["class"].astype(int)
+
 
     idx = NodeIndexer()
 
@@ -44,7 +46,7 @@ def load_elliptic_events(path):
         node = idx.get(f"tx_{r['txId']}")
         t = int(r["time"])
 
-        if r["class"] != 2:  # ignore unknown
+        if r["class"] in [1, 2]:  # ignore unknown
             y = 1 if r["class"] == 1 else 0
             labels_by_time[t].append((node, y))
 
