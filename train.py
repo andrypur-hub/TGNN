@@ -11,14 +11,11 @@ from model.node_classifier import NodeClassifier
 from model.evaluator import Evaluator
 
 
-# ====== PATH DATASET ======
-DATA_PATH = "/content/drive/MyDrive/ProjectPython/TGNN/Dataset/elliptic_bitcoin_dataset"
+DATA_PATH = "/content/drive/MyDrive/Datasets/elliptic_bitcoin_dataset"
 
 print("Loading Elliptic dataset...")
 events_by_time, labels_by_time, n_nodes = load_elliptic_events(DATA_PATH)
 
-
-# ====== MODEL INIT ======
 DIM = 64
 tgnn = TGNN(DIM)
 memory = NodeMemory(n_nodes, DIM)
@@ -29,23 +26,23 @@ optimizer = torch.optim.Adam(
     lr=1e-3
 )
 
+TRAIN_TIME = 34
 EPOCHS = 5
 
 
-# ====== TRAINING ======
+# =========================
+# TRAINING (PAST)
+# =========================
 for epoch in range(EPOCHS):
 
     total_loss = 0
     steps = 0
-    evaluator = Evaluator()
 
     for t in sorted(events_by_time.keys()):
 
         events = events_by_time[t]
 
-        # ======================
-        # 1) INGEST TRANSACTIONS
-        # ======================
+        # ingest always
         for e in events:
             hu = memory.get([e.src])
             hv = memory.get([e.dst])
@@ -56,22 +53,17 @@ for epoch in range(EPOCHS):
             memory.update([e.src], hu_new)
             memory.update([e.dst], hv_new)
 
-        # ======================
-        # 2) NODE CLASSIFICATION
-        # ======================
+        # TRAIN only past
+        if t > TRAIN_TIME:
+            continue
+
         if t not in labels_by_time:
             continue
 
-        nodes = []
-        labels = []
+        nodes, labels = zip(*labels_by_time[t])
 
-        for node, y in labels_by_time[t]:
-            nodes.append(node)
-            labels.append(y)
-
-        h = memory.get(nodes)
+        h = memory.get(list(nodes))
         logits = classifier(h).squeeze()
-
         y = torch.tensor(labels, dtype=torch.float)
 
         loss = F.binary_cross_entropy_with_logits(logits, y)
@@ -83,20 +75,53 @@ for epoch in range(EPOCHS):
         total_loss += loss.item()
         steps += 1
 
-        # collect metrics
-        evaluator.add_batch(logits, y)
+    print(f"Epoch {epoch+1}/{EPOCHS} Train Loss: {total_loss/steps:.4f}")
 
 
-    precision, recall, f1, auc = evaluator.compute()
+# =========================
+# TEST (FUTURE PREDICTION)
+# =========================
+print("\n===== EVALUATION ON FUTURE GRAPH =====")
 
-    print(f"""
-Epoch {epoch+1}/{EPOCHS}
-Loss      : {total_loss/steps:.4f}
+evaluator = Evaluator()
+
+for t in sorted(events_by_time.keys()):
+
+    events = events_by_time[t]
+
+    # memory still evolves
+    for e in events:
+        hu = memory.get([e.src])
+        hv = memory.get([e.dst])
+        x = torch.tensor([[e.x[0]]], dtype=torch.float)
+
+        hu_new, hv_new, _ = tgnn(hu, hv, x)
+        memory.update([e.src], hu_new)
+        memory.update([e.dst], hv_new)
+
+    # evaluate only future
+    if t <= TRAIN_TIME:
+        continue
+
+    if t not in labels_by_time:
+        continue
+
+    nodes, labels = zip(*labels_by_time[t])
+
+    with torch.no_grad():
+        h = memory.get(list(nodes))
+        logits = classifier(h).squeeze()
+        y = torch.tensor(labels, dtype=torch.float)
+
+    evaluator.add_batch(logits, y)
+
+
+precision, recall, f1, auc = evaluator.compute()
+
+print(f"""
+TEST RESULT (Future Fraud Detection)
 Precision : {precision:.4f}
 Recall    : {recall:.4f}
 F1-score  : {f1:.4f}
 ROC-AUC   : {auc:.4f}
 """)
-
-
-print("Training selesai")
