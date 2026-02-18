@@ -20,7 +20,8 @@ from model.node_classifier import NodeClassifier
 DATA_PATH = "/content/drive/MyDrive/ProjectPython/TGNN/Dataset/elliptic_bitcoin_dataset"
 
 print("Loading Elliptic dataset...")
-events_by_time, n_nodes = load_elliptic_events(DATA_PATH)
+
+events_by_time, labels_by_time, n_nodes = load_elliptic_events(DATA_PATH)
 
 DIM = 64
 tgnn = TGNN(DIM)
