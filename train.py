@@ -17,7 +17,7 @@ from model.memory import NodeMemory
 from model.tgnn import TGNN
 from model.node_classifier import NodeClassifier
 
-DATA_PATH = "/content/drive/MyDrive/Dataset/elliptic_bitcoin_dataset"
+DATA_PATH = "/content/drive/MyDrive/ProjectPython/TGNN/Dataset/elliptic_bitcoin_dataset"
 
 print("Loading Elliptic dataset...")
 events_by_time, n_nodes = load_elliptic_events(DATA_PATH)
