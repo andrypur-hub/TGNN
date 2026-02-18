@@ -29,6 +29,45 @@ optimizer = torch.optim.Adam(
 TRAIN_TIME = 34
 EPOCHS = 5
 
+DIM = 64
+tgnn = TGNN(DIM)
+memory = NodeMemory(n_nodes, DIM)
+classifier = NodeClassifier(DIM)
+
+optimizer = torch.optim.Adam(
+    list(tgnn.parameters()) + list(classifier.parameters()),
+    lr=1e-3
+)
+
+# ====== CLASS IMBALANCE HANDLING ======
+pos_weight = compute_class_weight(labels_by_time, TRAIN_TIME)
+print("Fraud weight:", pos_weight.item())
+
+
+# =========================
+# Cost Sensitive
+# =========================
+
+def compute_class_weight(labels_by_time, train_time):
+
+    fraud = 0
+    normal = 0
+
+    for t, pairs in labels_by_time.items():
+        if t > train_time:
+            continue
+        for _, y in pairs:
+            if y == 1:
+                fraud += 1
+            else:
+                normal += 1
+
+    print("Train fraud:", fraud, "normal:", normal)
+
+    weight = normal / max(fraud, 1)
+    return torch.tensor([weight], dtype=torch.float)
+
+
 
 # =========================
 # TRAINING (PAST)
@@ -66,7 +105,8 @@ for epoch in range(EPOCHS):
         logits = classifier(h).squeeze()
         y = torch.tensor(labels, dtype=torch.float)
 
-        loss = F.binary_cross_entropy_with_logits(logits, y)
+        loss = F.binary_cross_entropy_with_logits(logits, y, pos_weight=pos_weight)
+
 
         optimizer.zero_grad()
         loss.backward()
