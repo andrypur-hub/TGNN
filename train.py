@@ -31,6 +31,8 @@ optimizer = torch.optim.Adam(
     lr=1e-3
 )
 
+criterion = FocalLoss(alpha=0.75, gamma=2.0)
+
 TRAIN_TIME = 34
 EPOCHS = 5
 
@@ -81,8 +83,7 @@ for epoch in range(EPOCHS):
         steps += 1
 
     print(f"Epoch {epoch+1}/{EPOCHS} Train Loss: {total_loss/steps:.4f}")
-    criterion = FocalLoss(alpha=0.75, gamma=2.0)
-
+   
 
 # ================= TEST FUTURE =================
 print("\n===== EVALUATION ON FUTURE GRAPH =====")
