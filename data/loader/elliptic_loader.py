@@ -1,8 +1,3 @@
-import pandas as pd
-from graph.event import GraphEvent
-from graph.indexer import NodeIndexer
-from collections import defaultdict
-
 def load_elliptic_events(path):
 
     feat = pd.read_csv(f"{path}/elliptic_txs_features.csv", header=None)
@@ -16,31 +11,36 @@ def load_elliptic_events(path):
     nodes["class"] = nodes["class"].astype(int)
 
     idx = NodeIndexer()
+
+    # map tx → node id
+    for tx in nodes.txId:
+        idx.get(f"tx_{tx}")
+
     node_time = dict(zip(nodes.txId, nodes.time))
     node_label = dict(zip(nodes.txId, nodes["class"]))
 
-    events = []
+    # ---------- build temporal events ----------
+    events_by_time = defaultdict(list)
 
     for _, r in edge.iterrows():
         src = idx.get(f"tx_{r['txId1']}")
         dst = idx.get(f"tx_{r['txId2']}")
+        t = int(node_time[r['txId1']])
 
-        t = float(node_time[r['txId1']])
-        y = 1 if node_label[r['txId1']] == 1 else 0
+        events_by_time[t].append(GraphEvent(src, dst, t, [0.0], 0))
 
-        events.append(GraphEvent(src, dst, t, [0.0], y))
+    # ---------- build node labels ----------
+    labels_by_time = defaultdict(list)
 
-    events.sort(key=lambda e: e.t)
+    for _, r in nodes.iterrows():
+        node = idx.get(f"tx_{r['txId']}")
+        t = int(r["time"])
 
-    print("Elliptic events:", len(events))
-    print("Nodes:", idx.counter)
+        if r["class"] != 2:  # ignore unknown
+            y = 1 if r["class"] == 1 else 0
+            labels_by_time[t].append((node, y))
 
-    return events, idx.counter
+    print("Total nodes:", idx.counter)
+    print("Timesteps:", len(events_by_time))
 
-
-def group_by_time(events):
-    buckets = defaultdict(list)
-    for e in events:
-        buckets[e.t].append(e)
-    return dict(sorted(buckets.items()))
-
+    return events_by_time, labels_by_time, idx.counter
