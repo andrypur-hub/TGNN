@@ -1,6 +1,7 @@
 import pandas as pd
 from graph.event import GraphEvent
 from graph.indexer import NodeIndexer
+from collections import defaultdict
 
 def load_elliptic_events(path):
 
@@ -35,3 +36,11 @@ def load_elliptic_events(path):
     print("Nodes:", idx.counter)
 
     return events, idx.counter
+
+
+def group_by_time(events):
+    buckets = defaultdict(list)
+    for e in events:
+        buckets[e.t].append(e)
+    return dict(sorted(buckets.items()))
+
