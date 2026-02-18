@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-from data.elliptic_loader import load_elliptic_events
+from data.loader.elliptic_loader import load_elliptic_events
 from model.memory import NodeMemory
 from model.tgnn import TGNN
 
