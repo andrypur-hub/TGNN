@@ -1,0 +1,24 @@
+# dataset
+*.csv
+*.zip
+*.gz
+*.parquet
+elliptic_bitcoin_dataset/
+
+# training artifacts
+*.pt
+*.pth
+*.pkl
+checkpoints/
+runs/
+
+# python
+__pycache__/
+*.pyc
+
+# colab
+.ipynb_checkpoints
+
+# OS
+.DS_Store
+Thumbs.db
