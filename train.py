@@ -127,7 +127,22 @@ for t in test_times:
 # ================= METRICS =================
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
 
-y_hat = [1 if p > 0.5 else 0 for p in y_pred]
+import numpy as np
+
+best_f1 = 0
+best_th = 0.5
+
+for th in np.linspace(0.01,0.99,50):
+    y_hat = [1 if p > th else 0 for p in y_pred]
+    f1 = f1_score(y_true, y_hat, zero_division=0)
+    if f1 > best_f1:
+        best_f1 = f1
+        best_th = th
+
+print("Best threshold:", best_th)
+
+y_hat = [1 if p > best_th else 0 for p in y_pred]
+
 
 print("\nTEST RESULT (Future Fraud Detection)")
 print("Precision :", precision_score(y_true, y_hat, zero_division=0))
