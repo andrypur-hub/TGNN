@@ -4,7 +4,7 @@ import torch.nn as nn
 
 class TGNN(nn.Module):
 
-    def __init__(self, dim, feature_dim=166):
+    def __init__(self, dim, feature_dim=165):
         super().__init__()
         self.dim = dim
         self.feature_dim = feature_dim
