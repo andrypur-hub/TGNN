@@ -12,14 +12,12 @@ from model.loss import FocalLoss
 from graph.neighborhood import NeighborFinder
 
 
-# ================= DATA =================
 DATA_PATH = "/content/drive/MyDrive/ProjectPython/TGNN/Dataset/elliptic_bitcoin_dataset"
 
 print("Loading Elliptic dataset...")
 events_by_time, labels_by_time, n_nodes = load_elliptic_events(DATA_PATH)
 
 
-# ================= MODEL =================
 DIM = 64
 tgnn = TGNN(DIM)
 memory = NodeMemory(n_nodes, DIM)
@@ -47,7 +45,7 @@ for epoch in range(EPOCHS):
 
         events = events_by_time[t]
 
-        # ---------- ingest transactions ----------
+        # ingest
         for e in events:
 
             hu = memory.get([e.src])
@@ -56,30 +54,18 @@ for epoch in range(EPOCHS):
             nu = neighbors.get_neighbors(e.src)
             nv = neighbors.get_neighbors(e.dst)
 
-            if len(nu) > 0:
-                neigh_u = memory.get(nu).mean(dim=0, keepdim=True)
-            else:
-                neigh_u = torch.zeros_like(hu)
+            neigh_u = memory.get(nu).mean(dim=0, keepdim=True) if len(nu) else torch.zeros_like(hu)
+            neigh_v = memory.get(nv).mean(dim=0, keepdim=True) if len(nv) else torch.zeros_like(hv)
 
-            if len(nv) > 0:
-                neigh_v = memory.get(nv).mean(dim=0, keepdim=True)
-            else:
-                neigh_v = torch.zeros_like(hv)
-
-            x = torch.tensor([[e.x[0]]], dtype=torch.float)
+            x = torch.tensor([e.x], dtype=torch.float)
 
             hu_new, hv_new, _ = tgnn(hu, hv, neigh_u, neigh_v, x)
 
             memory.update([e.src], hu_new)
             memory.update([e.dst], hv_new)
-
             neighbors.add_edge(e.src, e.dst)
 
-        # ---------- training only past ----------
-        if t > TRAIN_TIME:
-            continue
-
-        if t not in labels_by_time:
+        if t > TRAIN_TIME or t not in labels_by_time:
             continue
 
         nodes, labels = zip(*labels_by_time[t])
@@ -109,7 +95,6 @@ for t in sorted(events_by_time.keys()):
 
     events = events_by_time[t]
 
-    # graph tetap berkembang
     for e in events:
 
         hu = memory.get([e.src])
@@ -118,31 +103,19 @@ for t in sorted(events_by_time.keys()):
         nu = neighbors.get_neighbors(e.src)
         nv = neighbors.get_neighbors(e.dst)
 
-        if len(nu) > 0:
-            neigh_u = memory.get(nu).mean(dim=0, keepdim=True)
-        else:
-            neigh_u = torch.zeros_like(hu)
+        neigh_u = memory.get(nu).mean(dim=0, keepdim=True) if len(nu) else torch.zeros_like(hu)
+        neigh_v = memory.get(nv).mean(dim=0, keepdim=True) if len(nv) else torch.zeros_like(hv)
 
-        if len(nv) > 0:
-            neigh_v = memory.get(nv).mean(dim=0, keepdim=True)
-        else:
-            neigh_v = torch.zeros_like(hv)
-
-        x = torch.tensor([[e.x[0]]], dtype=torch.float)
+        x = torch.tensor([e.x], dtype=torch.float)
 
         with torch.no_grad():
             hu_new, hv_new, _ = tgnn(hu, hv, neigh_u, neigh_v, x)
 
         memory.update([e.src], hu_new)
         memory.update([e.dst], hv_new)
-
         neighbors.add_edge(e.src, e.dst)
 
-    # evaluasi hanya masa depan
-    if t <= TRAIN_TIME:
-        continue
-
-    if t not in labels_by_time:
+    if t <= TRAIN_TIME or t not in labels_by_time:
         continue
 
     nodes, labels = zip(*labels_by_time[t])
