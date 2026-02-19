@@ -6,24 +6,32 @@ from collections import defaultdict
 from data.loader.elliptic_loader import load_elliptic_events
 from model.tgnn import TGNN
 
+# ================= LOAD DATA =================
 DATA_PATH = "/content/drive/MyDrive/ProjectPython/TGNN/Dataset/elliptic_bitcoin_dataset"
 
 events_by_time, labels_by_time, n_nodes = load_elliptic_events(DATA_PATH)
 
 DIM = 64
 EPOCHS = 5
-TRAIN_TIME = 34
+TRAIN_TIME = 34   # train pakai masa lalu (1..34), test masa depan (35..49)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# memory state
+# waktu asli graph (PENTING!!)
+all_times = sorted(events_by_time.keys())
+train_times = [t for t in all_times if t <= TRAIN_TIME]
+test_times  = [t for t in all_times if t >  TRAIN_TIME]
+
+print("Train times:", train_times[:3], "...", train_times[-3:])
+print("Test times :", test_times[:3], "...", test_times[-3:])
+
+# ================= MODEL =================
 memory = torch.zeros(n_nodes, DIM, device=device)
 
 tgnn = TGNN(DIM).to(device)
 optimizer = torch.optim.Adam(tgnn.parameters(), lr=0.001)
 criterion = nn.BCEWithLogitsLoss()
 
-# neighbor storage
 neighbors = defaultdict(list)
 
 def aggregate(node_id):
@@ -36,7 +44,7 @@ for epoch in range(EPOCHS):
 
     total_loss = 0
 
-    for t in range(TRAIN_TIME):
+    for t in train_times:
 
         for e in events_by_time[t]:
 
@@ -50,13 +58,14 @@ for epoch in range(EPOCHS):
             y = torch.tensor([[e.y]], dtype=torch.float, device=device)
 
             hu_new, hv_new, logits = tgnn(hu, hv, neigh_u, neigh_v, x)
+
             loss = criterion(logits.unsqueeze(-1), y)
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            # UPDATE memory only during training
+            # update memory hanya saat training
             memory[e.src] = hu_new.detach().squeeze(0)
             memory[e.dst] = hv_new.detach().squeeze(0)
 
@@ -67,12 +76,12 @@ for epoch in range(EPOCHS):
 
     print(f"Epoch {epoch+1}/{EPOCHS} Train Loss: {total_loss:.4f}")
 
-# ================= TEST (NO UPDATE MEMORY) =================
+# ================= TEST =================
 print("\n===== EVALUATION ON FUTURE GRAPH =====")
 
 y_true, y_pred = [], []
 
-for t in range(TRAIN_TIME, 49):
+for t in test_times:
 
     for e in events_by_time[t]:
 
@@ -91,10 +100,10 @@ for t in range(TRAIN_TIME, 49):
         y_true.append(e.y)
         y_pred.append(prob)
 
-# metrics
+# ================= METRICS =================
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
 
-y_hat = [1 if p>0.5 else 0 for p in y_pred]
+y_hat = [1 if p > 0.5 else 0 for p in y_pred]
 
 print("\nTEST RESULT (Future Fraud Detection)")
 print("Precision :", precision_score(y_true, y_hat, zero_division=0))
