@@ -39,6 +39,15 @@ def aggregate(node_id):
         return torch.zeros(1, DIM, device=device)
     return torch.mean(torch.stack(neighbors[node_id]), dim=0, keepdim=True)
 
+# ===== NEGATIVE SAMPLING =====
+import random
+
+def sample_negative(dst_node, n_nodes):
+    neg = random.randint(0, n_nodes-1)
+    while neg == dst_node:
+        neg = random.randint(0, n_nodes-1)
+    return neg
+
 # ================= TRAIN =================
 for epoch in range(EPOCHS):
 
@@ -57,9 +66,24 @@ for epoch in range(EPOCHS):
             x = torch.from_numpy(e.x).float().unsqueeze(0).to(device)
             y = torch.tensor([[e.y]], dtype=torch.float, device=device)
 
-            hu_new, hv_new, logits = tgnn(hu, hv, neigh_u, neigh_v, x)
+            # ===== POSITIVE EDGE =====
+            hu_new, hv_new, pos_logits = tgnn(hu, hv, neigh_u, neigh_v, x)
+            pos_label = torch.ones((1,1), device=device)
 
-            loss = criterion(logits.unsqueeze(-1), y)
+            # ===== NEGATIVE EDGE =====
+            neg_dst = sample_negative(e.dst, n_nodes)
+
+            hv_neg = memory[neg_dst].unsqueeze(0)
+            neigh_neg = aggregate(neg_dst)
+
+            _, _, neg_logits = tgnn(hu, hv_neg, neigh_u, neigh_neg, x)
+            neg_label = torch.zeros((1,1), device=device)
+
+            # ===== LOSS =====
+            loss_pos = criterion(pos_logits.unsqueeze(-1), pos_label)
+            loss_neg = criterion(neg_logits.unsqueeze(-1), neg_label)
+
+            loss = loss_pos + loss_neg
 
             optimizer.zero_grad()
             loss.backward()
