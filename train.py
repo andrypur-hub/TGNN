@@ -1,140 +1,103 @@
-import sys, os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
 import torch
+import torch.nn as nn
+import numpy as np
+from collections import defaultdict
 
 from data.loader.elliptic_loader import load_elliptic_events
-from model.memory import NodeMemory
 from model.tgnn import TGNN
-from model.node_classifier import NodeClassifier
-from model.evaluator import Evaluator
-from model.loss import FocalLoss
-from graph.neighborhood import NeighborFinder
-
 
 DATA_PATH = "/content/drive/MyDrive/ProjectPython/TGNN/Dataset/elliptic_bitcoin_dataset"
 
-print("Loading Elliptic dataset...")
 events_by_time, labels_by_time, n_nodes = load_elliptic_events(DATA_PATH)
 
-
 DIM = 64
-tgnn = TGNN(DIM)
-memory = NodeMemory(n_nodes, DIM)
-classifier = NodeClassifier(DIM)
-neighbors = NeighborFinder()
-
-optimizer = torch.optim.Adam(
-    list(tgnn.parameters()) + list(classifier.parameters()),
-    lr=1e-3
-)
-
-criterion = FocalLoss(alpha=0.75, gamma=2.0)
-
-TRAIN_TIME = 34
 EPOCHS = 5
+TRAIN_TIME = 34
 
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# memory state
+memory = torch.zeros(n_nodes, DIM, device=device)
+
+tgnn = TGNN(DIM).to(device)
+optimizer = torch.optim.Adam(tgnn.parameters(), lr=0.001)
+criterion = nn.BCEWithLogitsLoss()
+
+# neighbor storage
+neighbors = defaultdict(list)
+
+def aggregate(node_id):
+    if len(neighbors[node_id]) == 0:
+        return torch.zeros(1, DIM, device=device)
+    return torch.mean(torch.stack(neighbors[node_id]), dim=0, keepdim=True)
 
 # ================= TRAIN =================
 for epoch in range(EPOCHS):
 
     total_loss = 0
-    steps = 0
 
-    for t in sorted(events_by_time.keys()):
+    for t in range(TRAIN_TIME):
 
-        events = events_by_time[t]
+        for e in events_by_time[t]:
 
-        # ingest
-        for e in events:
+            hu = memory[e.src].unsqueeze(0)
+            hv = memory[e.dst].unsqueeze(0)
 
-            hu = memory.get([e.src])
-            hv = memory.get([e.dst])
+            neigh_u = aggregate(e.src)
+            neigh_v = aggregate(e.dst)
 
-            nu = neighbors.get_neighbors(e.src)
-            nv = neighbors.get_neighbors(e.dst)
+            x = torch.from_numpy(e.x).float().unsqueeze(0).to(device)
+            y = torch.tensor([[e.y]], dtype=torch.float, device=device)
 
-            neigh_u = memory.get(nu).mean(dim=0, keepdim=True) if len(nu) else torch.zeros_like(hu)
-            neigh_v = memory.get(nv).mean(dim=0, keepdim=True) if len(nv) else torch.zeros_like(hv)
+            hu_new, hv_new, logits = tgnn(hu, hv, neigh_u, neigh_v, x)
+            loss = criterion(logits.unsqueeze(-1), y)
 
-            x = torch.from_numpy(e.x).float().unsqueeze(0)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
+            # UPDATE memory only during training
+            memory[e.src] = hu_new.detach().squeeze(0)
+            memory[e.dst] = hv_new.detach().squeeze(0)
 
-            hu_new, hv_new, _ = tgnn(hu, hv, neigh_u, neigh_v, x)
+            neighbors[e.src].append(hv_new.detach().squeeze(0))
+            neighbors[e.dst].append(hu_new.detach().squeeze(0))
 
-            memory.update([e.src], hu_new)
-            memory.update([e.dst], hv_new)
-            neighbors.add_edge(e.src, e.dst)
+            total_loss += loss.item()
 
-        if t > TRAIN_TIME or t not in labels_by_time:
-            continue
+    print(f"Epoch {epoch+1}/{EPOCHS} Train Loss: {total_loss:.4f}")
 
-        nodes, labels = zip(*labels_by_time[t])
-
-        h = memory.get(list(nodes))
-        logits = classifier(h).squeeze()
-        y = torch.tensor(labels, dtype=torch.float)
-
-        loss = criterion(logits, y)
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        total_loss += loss.item()
-        steps += 1
-
-    print(f"Epoch {epoch+1}/{EPOCHS} Train Loss: {total_loss/steps:.4f}")
-
-
-# ================= TEST =================
+# ================= TEST (NO UPDATE MEMORY) =================
 print("\n===== EVALUATION ON FUTURE GRAPH =====")
 
-evaluator = Evaluator()
+y_true, y_pred = [], []
 
-for t in sorted(events_by_time.keys()):
+for t in range(TRAIN_TIME, 49):
 
-    events = events_by_time[t]
+    for e in events_by_time[t]:
 
-    for e in events:
+        hu = memory[e.src].unsqueeze(0)
+        hv = memory[e.dst].unsqueeze(0)
 
-        hu = memory.get([e.src])
-        hv = memory.get([e.dst])
+        neigh_u = aggregate(e.src)
+        neigh_v = aggregate(e.dst)
 
-        nu = neighbors.get_neighbors(e.src)
-        nv = neighbors.get_neighbors(e.dst)
+        x = torch.from_numpy(e.x).float().unsqueeze(0).to(device)
 
-        neigh_u = memory.get(nu).mean(dim=0, keepdim=True) if len(nu) else torch.zeros_like(hu)
-        neigh_v = memory.get(nv).mean(dim=0, keepdim=True) if len(nv) else torch.zeros_like(hv)
+        _, _, logits = tgnn(hu, hv, neigh_u, neigh_v, x)
 
-        x = torch.tensor([e.x], dtype=torch.float)
+        prob = torch.sigmoid(logits).item()
 
-        with torch.no_grad():
-            hu_new, hv_new, _ = tgnn(hu, hv, neigh_u, neigh_v, x)
+        y_true.append(e.y)
+        y_pred.append(prob)
 
-        memory.update([e.src], hu_new)
-        memory.update([e.dst], hv_new)
-        neighbors.add_edge(e.src, e.dst)
+# metrics
+from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
 
-    if t <= TRAIN_TIME or t not in labels_by_time:
-        continue
+y_hat = [1 if p>0.5 else 0 for p in y_pred]
 
-    nodes, labels = zip(*labels_by_time[t])
-
-    with torch.no_grad():
-        h = memory.get(list(nodes))
-        logits = classifier(h).squeeze()
-        y = torch.tensor(labels, dtype=torch.float)
-
-    evaluator.add_batch(logits, y)
-
-
-precision, recall, f1, auc = evaluator.compute()
-
-print(f"""
-TEST RESULT (Future Fraud Detection)
-Precision : {precision:.4f}
-Recall    : {recall:.4f}
-F1-score  : {f1:.4f}
-ROC-AUC   : {auc:.4f}
-""")
+print("\nTEST RESULT (Future Fraud Detection)")
+print("Precision :", precision_score(y_true, y_hat, zero_division=0))
+print("Recall    :", recall_score(y_true, y_hat, zero_division=0))
+print("F1-score  :", f1_score(y_true, y_hat, zero_division=0))
+print("ROC-AUC   :", roc_auc_score(y_true, y_pred))
