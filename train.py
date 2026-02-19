@@ -57,7 +57,8 @@ for epoch in range(EPOCHS):
             neigh_u = memory.get(nu).mean(dim=0, keepdim=True) if len(nu) else torch.zeros_like(hu)
             neigh_v = memory.get(nv).mean(dim=0, keepdim=True) if len(nv) else torch.zeros_like(hv)
 
-            x = torch.tensor([e.x], dtype=torch.float)
+            x = torch.from_numpy(e.x).float().unsqueeze(0)
+
 
             hu_new, hv_new, _ = tgnn(hu, hv, neigh_u, neigh_v, x)
 
