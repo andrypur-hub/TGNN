@@ -9,7 +9,7 @@ from data.loader.elliptic_loader import load_elliptic_events
 from model.tgnn import TGNN
 
 # ================= LOAD DATA =================
-DATA_PATH = "elliptic_bitcoin_dataset"
+DATA_PATH = "/content/drive/MyDrive/ProjectPython/TGNN/dataset/elliptic_bitcoin_dataset"
 events_by_time, labels_by_time, n_nodes = load_elliptic_events(DATA_PATH)
 
 DIM = 64
