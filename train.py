@@ -15,6 +15,7 @@ events_by_time, labels_by_time, n_nodes = load_elliptic_events(DATA_PATH)
 DIM = 64
 EPOCHS = 5
 TRAIN_TIME = 34
+DECAY = 0.0005
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -30,8 +31,6 @@ print("Test times :", test_times[:3], "...", test_times[-3:])
 memory = torch.zeros(n_nodes, DIM, device=device)
 last_update = torch.zeros(n_nodes, device=device)
 
-DECAY = 0.0005
-
 tgnn = TGNN(DIM).to(device)
 optimizer = torch.optim.Adam(tgnn.parameters(), lr=0.001)
 criterion = nn.BCEWithLogitsLoss()
@@ -40,10 +39,12 @@ neighbors = defaultdict(list)
 
 # ================= FUNCTIONS =================
 
-def aggregate(node_id):
+def aggregate(node_id, h_self):
     if len(neighbors[node_id]) == 0:
         return torch.zeros(1, DIM, device=device)
-    return torch.mean(torch.stack(neighbors[node_id]), dim=0, keepdim=True)
+
+    neigh = [n.to(device) for n in neighbors[node_id]]
+    return tgnn.neighbor_attention(h_self, neigh)
 
 def sample_negative(dst_node, n_nodes):
     neg = random.randint(0, n_nodes-1)
@@ -65,15 +66,15 @@ for epoch in range(EPOCHS):
 
         for e in events_by_time[t]:
 
-            # decay
+            # apply decay
             temporal_decay(e.src, t)
             temporal_decay(e.dst, t)
 
             hu = memory[e.src].unsqueeze(0)
             hv = memory[e.dst].unsqueeze(0)
 
-            neigh_u = aggregate(e.src)
-            neigh_v = aggregate(e.dst)
+            neigh_u = aggregate(e.src, hu)
+            neigh_v = aggregate(e.dst, hv)
 
             x = torch.from_numpy(e.x).float().unsqueeze(0).to(device)
 
@@ -83,10 +84,10 @@ for epoch in range(EPOCHS):
 
             # ===== NEGATIVE EDGE =====
             neg_dst = sample_negative(e.dst, n_nodes)
-
             temporal_decay(neg_dst, t)
+
             hv_neg = memory[neg_dst].unsqueeze(0)
-            neigh_neg = aggregate(neg_dst)
+            neigh_neg = aggregate(neg_dst, hv_neg)
 
             _, _, neg_logits = tgnn(hu, hv_neg, neigh_u, neigh_neg, x)
             neg_label = torch.zeros((1,1), device=device)
@@ -100,7 +101,7 @@ for epoch in range(EPOCHS):
             loss.backward()
             optimizer.step()
 
-            # update memory (hanya edge asli)
+            # update memory only true edge
             memory[e.src] = hu_new.detach().squeeze(0)
             memory[e.dst] = hv_new.detach().squeeze(0)
 
@@ -129,8 +130,8 @@ for t in test_times:
         hu = memory[e.src].unsqueeze(0)
         hv = memory[e.dst].unsqueeze(0)
 
-        neigh_u = aggregate(e.src)
-        neigh_v = aggregate(e.dst)
+        neigh_u = aggregate(e.src, hu)
+        neigh_v = aggregate(e.dst, hv)
 
         x = torch.from_numpy(e.x).float().unsqueeze(0).to(device)
 
