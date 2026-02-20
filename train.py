@@ -53,7 +53,7 @@ def sample_negative(dst_node, n_nodes):
 
 def temporal_decay(node_id, current_time):
     delta = current_time - last_update[node_id]
-    factor = torch.exp(torch.tensor(-DECAY * delta, device=device))
+    factor = torch.exp(-DECAY * delta)
     memory[node_id] *= factor
 
 # ================= TRAIN =================
