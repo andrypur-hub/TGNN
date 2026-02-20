@@ -9,7 +9,7 @@ from data.loader.elliptic_loader import load_elliptic_events
 from model.tgnn import TGNN
 
 # ================= LOAD DATA =================
-DATA_PATH = "/content/drive/MyDrive/ProjectPython/TGNN/Dataset/elliptic_bitcoin_dataset"
+DATA_PATH = "elliptic_bitcoin_dataset"
 events_by_time, labels_by_time, n_nodes = load_elliptic_events(DATA_PATH)
 
 DIM = 64
@@ -19,7 +19,7 @@ DECAY = 0.0005
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# waktu asli graph
+# waktu graph asli (jangan range!)
 all_times = sorted(events_by_time.keys())
 train_times = [t for t in all_times if t <= TRAIN_TIME]
 test_times  = [t for t in all_times if t > TRAIN_TIME]
@@ -66,7 +66,7 @@ for epoch in range(EPOCHS):
 
         for e in events_by_time[t]:
 
-            # apply decay
+            # time decay
             temporal_decay(e.src, t)
             temporal_decay(e.dst, t)
 
@@ -78,7 +78,7 @@ for epoch in range(EPOCHS):
 
             x = torch.from_numpy(e.x).float().unsqueeze(0).to(device)
 
-            # ===== POSITIVE EDGE =====
+            # ===== POSITIVE EDGE (structure learning) =====
             hu_new, hv_new, pos_logits = tgnn(hu, hv, neigh_u, neigh_v, x)
             pos_label = torch.ones((1,1), device=device)
 
@@ -92,16 +92,24 @@ for epoch in range(EPOCHS):
             _, _, neg_logits = tgnn(hu, hv_neg, neigh_u, neigh_neg, x)
             neg_label = torch.zeros((1,1), device=device)
 
-            # ===== LOSS =====
+            # structure loss
             loss_pos = criterion(pos_logits.unsqueeze(-1), pos_label)
             loss_neg = criterion(neg_logits.unsqueeze(-1), neg_label)
-            loss = loss_pos + loss_neg
+            structure_loss = loss_pos + loss_neg
+
+            # ===== FRAUD SUPERVISION =====
+            fraud_logit = tgnn.predict(hu_new)
+            fraud_label = torch.tensor([[e.y]], dtype=torch.float, device=device)
+            fraud_loss = criterion(fraud_logit, fraud_label)
+
+            # ===== FINAL LOSS =====
+            loss = structure_loss + fraud_loss
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            # update memory only true edge
+            # update memory (ONLY real edge)
             memory[e.src] = hu_new.detach().squeeze(0)
             memory[e.dst] = hv_new.detach().squeeze(0)
 
@@ -135,8 +143,9 @@ for t in test_times:
 
         x = torch.from_numpy(e.x).float().unsqueeze(0).to(device)
 
-        _, _, logits = tgnn(hu, hv, neigh_u, neigh_v, x)
-        prob = torch.sigmoid(logits).item()
+        # fraud prediction from node embedding
+        fraud_logit = tgnn.predict(hu)
+        prob = torch.sigmoid(fraud_logit).item()
 
         y_true.append(e.y)
         y_pred.append(prob)
