@@ -16,10 +16,11 @@ DIM = 64
 EPOCHS = 5
 TRAIN_TIME = 34
 DECAY = 0.0005
+LAMBDA = 20.0
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# waktu graph asli (jangan range!)
+# waktu graph asli
 all_times = sorted(events_by_time.keys())
 train_times = [t for t in all_times if t <= TRAIN_TIME]
 test_times  = [t for t in all_times if t > TRAIN_TIME]
@@ -42,8 +43,7 @@ neighbors = defaultdict(list)
 def aggregate(node_id, h_self):
     if len(neighbors[node_id]) == 0:
         return torch.zeros(1, DIM, device=device)
-
-    neigh = [n.to(device) for n in neighbors[node_id]]
+    neigh = [n.detach() for n in neighbors[node_id]]
     return tgnn.neighbor_attention(h_self, neigh)
 
 def sample_negative(dst_node, n_nodes):
@@ -66,19 +66,20 @@ for epoch in range(EPOCHS):
 
         for e in events_by_time[t]:
 
-            # time decay
+            # decay memory
             temporal_decay(e.src, t)
             temporal_decay(e.dst, t)
 
-            hu = memory[e.src].unsqueeze(0)
-            hv = memory[e.dst].unsqueeze(0)
+            # snapshot memory (VERY IMPORTANT)
+            hu = memory[e.src].detach().clone().unsqueeze(0)
+            hv = memory[e.dst].detach().clone().unsqueeze(0)
 
             neigh_u = aggregate(e.src, hu)
             neigh_v = aggregate(e.dst, hv)
 
             x = torch.from_numpy(e.x).float().unsqueeze(0).to(device)
 
-            # ===== POSITIVE EDGE (structure learning) =====
+            # ===== POSITIVE EDGE =====
             hu_new, hv_new = tgnn(hu, hv, neigh_u, neigh_v, x)
             pos_logits = tgnn.predict(hu_new, x)
             pos_label = torch.ones((1,1), device=device)
@@ -87,65 +88,84 @@ for epoch in range(EPOCHS):
             neg_dst = sample_negative(e.dst, n_nodes)
             temporal_decay(neg_dst, t)
 
-            hv_neg = memory[neg_dst].unsqueeze(0)
+            hv_neg = memory[neg_dst].detach().clone().unsqueeze(0)
             neigh_neg = aggregate(neg_dst, hv_neg)
 
             hu_neg, hv_neg_new = tgnn(hu, hv_neg, neigh_u, neigh_neg, x)
             neg_logits = tgnn.predict(hu_neg, x)
             neg_label = torch.zeros((1,1), device=device)
-            
-            # ===== STRUCTURE LEARNING LOSS =====
-            structure_loss_pos = criterion(pos_logits, pos_label)
-            structure_loss_neg = criterion(neg_logits, neg_label)
-            structure_loss = structure_loss_pos + structure_loss_neg
 
-            # ===== FRAUD SUPERVISION =====
-            fraud_logit = tgnn.predict(hu_new, x)
+            # structure loss
+            loss_pos = criterion(pos_logits, pos_label)
+            loss_neg = criterion(neg_logits, neg_label)
+            structure_loss = loss_pos + loss_neg
+
+            # fraud supervision
             fraud_label = torch.tensor([[e.y]], dtype=torch.float, device=device)
+            fraud_logit = tgnn.predict(hu_new, x)
             fraud_loss = criterion(fraud_logit, fraud_label)
 
-            # ===== FINAL LOSS =====
-            LAMBDA = 20.0
             loss = structure_loss + LAMBDA * fraud_loss
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            # update memory (ONLY real edge)
-            memory[e.src] = hu_new.detach().squeeze(0)
-            memory[e.dst] = hv_new.detach().squeeze(0)
+            # ===== UPDATE MEMORY (NO GRAD) =====
+            with torch.no_grad():
+                memory[e.src] = hu_new.squeeze(0)
+                memory[e.dst] = hv_new.squeeze(0)
 
-            last_update[e.src] = t
-            last_update[e.dst] = t
+                last_update[e.src] = t
+                last_update[e.dst] = t
 
-            neighbors[e.src].append(hv_new.detach().squeeze(0))
-            neighbors[e.dst].append(hu_new.detach().squeeze(0))
+                neighbors[e.src].append(hv_new.squeeze(0))
+                neighbors[e.dst].append(hu_new.squeeze(0))
 
             total_loss += loss.item()
 
     print(f"Epoch {epoch+1}/{EPOCHS} Train Loss: {total_loss:.4f}")
 
 # ================= TEST =================
-# ===== APPLY TRANSACTION (UPDATE GRAPH) =====
-    hu_new, hv_new = tgnn(hu, hv, neigh_u, neigh_v, x)
+print("\n===== EVALUATION ON FUTURE GRAPH =====")
 
-# ===== FRAUD PREDICTION =====
-    fraud_logit = tgnn.predict(hu_new, x)
-    prob = torch.sigmoid(fraud_logit).item()
+y_true, y_pred = [], []
 
-    y_true.append(e.y)
-    y_pred.append(prob)
+for t in test_times:
 
-# ===== UPDATE MEMORY (WAJIB UNTUK TEMPORAL GRAPH) =====
-    memory[e.src] = hu_new.detach().squeeze(0)
-    memory[e.dst] = hv_new.detach().squeeze(0)
+    for e in events_by_time[t]:
 
-    neighbors[e.src].append(hv_new.detach().squeeze(0))
-    neighbors[e.dst].append(hu_new.detach().squeeze(0))
+        temporal_decay(e.src, t)
+        temporal_decay(e.dst, t)
 
-    last_update[e.src] = t
-    last_update[e.dst] = t
+        hu = memory[e.src].detach().clone().unsqueeze(0)
+        hv = memory[e.dst].detach().clone().unsqueeze(0)
+
+        neigh_u = aggregate(e.src, hu)
+        neigh_v = aggregate(e.dst, hv)
+
+        x = torch.from_numpy(e.x).float().unsqueeze(0).to(device)
+
+        # apply transaction
+        hu_new, hv_new = tgnn(hu, hv, neigh_u, neigh_v, x)
+
+        # predict fraud AFTER update
+        fraud_logit = tgnn.predict(hu_new, x)
+        prob = torch.sigmoid(fraud_logit).item()
+
+        y_true.append(e.y)
+        y_pred.append(prob)
+
+        # evolve graph
+        with torch.no_grad():
+            memory[e.src] = hu_new.squeeze(0)
+            memory[e.dst] = hv_new.squeeze(0)
+
+            neighbors[e.src].append(hv_new.squeeze(0))
+            neighbors[e.dst].append(hu_new.squeeze(0))
+
+            last_update[e.src] = t
+            last_update[e.dst] = t
 
 # ================= THRESHOLD SEARCH =================
 best_f1 = 0
