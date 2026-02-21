@@ -98,7 +98,7 @@ for epoch in range(EPOCHS):
             structure_loss = loss_pos + loss_neg
 
             # ===== FRAUD SUPERVISION =====
-            fraud_logit = tgnn.predict(hu_new)
+            fraud_logit = tgnn.predict(hu_new, x)
             fraud_label = torch.tensor([[e.y]], dtype=torch.float, device=device)
             fraud_loss = criterion(fraud_logit, fraud_label)
 
@@ -145,7 +145,7 @@ for t in test_times:
         x = torch.from_numpy(e.x).float().unsqueeze(0).to(device)
 
         # fraud prediction from node embedding
-        fraud_logit = tgnn.predict(hu)
+        fraud_logit = tgnn.predict(hu,x)
         prob = torch.sigmoid(fraud_logit).item()
 
         y_true.append(e.y)
