@@ -103,7 +103,8 @@ for epoch in range(EPOCHS):
             fraud_loss = criterion(fraud_logit, fraud_label)
 
             # ===== FINAL LOSS =====
-            loss = structure_loss + fraud_loss
+            LAMBDA = 20.0
+            loss = structure_loss + LAMBDA + fraud_loss
 
             optimizer.zero_grad()
             loss.backward()
