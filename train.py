@@ -79,7 +79,8 @@ for epoch in range(EPOCHS):
             x = torch.from_numpy(e.x).float().unsqueeze(0).to(device)
 
             # ===== POSITIVE EDGE (structure learning) =====
-            hu_new, hv_new, pos_logits = tgnn(hu, hv, neigh_u, neigh_v, x)
+            hu_new, hv_new = tgnn(hu, hv, neigh_u, neigh_v, x)
+            pos_logits = tgnn.predict(hu_new, x)
             pos_label = torch.ones((1,1), device=device)
 
             # ===== NEGATIVE EDGE =====
@@ -89,13 +90,14 @@ for epoch in range(EPOCHS):
             hv_neg = memory[neg_dst].unsqueeze(0)
             neigh_neg = aggregate(neg_dst, hv_neg)
 
-            _, _, neg_logits = tgnn(hu, hv_neg, neigh_u, neigh_neg, x)
+            hu_neg, hv_neg_new = tgnn(hu, hv_neg, neigh_u, neigh_neg, x)
+            neg_logits = tgnn.predict(hu_neg, x)
             neg_label = torch.zeros((1,1), device=device)
-
+            
             # structure loss
-            loss_pos = criterion(pos_logits.unsqueeze(-1), pos_label)
-            loss_neg = criterion(neg_logits.unsqueeze(-1), neg_label)
-            structure_loss = loss_pos + loss_neg
+            loss_pos = criterion(pos_logits, pos_label)
+            loss_neg = criterion(neg_logits, neg_label)
+            loss = loss_pos + loss_neg
 
             # ===== FRAUD SUPERVISION =====
             fraud_logit = tgnn.predict(hu_new, x)
