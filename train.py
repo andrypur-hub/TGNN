@@ -94,10 +94,10 @@ for epoch in range(EPOCHS):
             neg_logits = tgnn.predict(hu_neg, x)
             neg_label = torch.zeros((1,1), device=device)
             
-            # structure loss
-            loss_pos = criterion(pos_logits, pos_label)
-            loss_neg = criterion(neg_logits, neg_label)
-            loss = loss_pos + loss_neg
+            # ===== STRUCTURE LEARNING LOSS =====
+            structure_loss_pos = criterion(pos_logits, pos_label)
+            structure_loss_neg = criterion(neg_logits, neg_label)
+            structure_loss = structure_loss_pos + structure_loss_neg
 
             # ===== FRAUD SUPERVISION =====
             fraud_logit = tgnn.predict(hu_new, x)
@@ -106,7 +106,7 @@ for epoch in range(EPOCHS):
 
             # ===== FINAL LOSS =====
             LAMBDA = 20.0
-            loss = structure_loss + LAMBDA + fraud_loss
+            loss = structure_loss + LAMBDA * fraud_loss
 
             optimizer.zero_grad()
             loss.backward()
@@ -127,31 +127,25 @@ for epoch in range(EPOCHS):
     print(f"Epoch {epoch+1}/{EPOCHS} Train Loss: {total_loss:.4f}")
 
 # ================= TEST =================
-print("\n===== EVALUATION ON FUTURE GRAPH =====")
+# ===== APPLY TRANSACTION (UPDATE GRAPH) =====
+    hu_new, hv_new = tgnn(hu, hv, neigh_u, neigh_v, x)
 
-y_true, y_pred = [], []
+# ===== FRAUD PREDICTION =====
+    fraud_logit = tgnn.predict(hu_new, x)
+    prob = torch.sigmoid(fraud_logit).item()
 
-for t in test_times:
+    y_true.append(e.y)
+    y_pred.append(prob)
 
-    for e in events_by_time[t]:
+# ===== UPDATE MEMORY (WAJIB UNTUK TEMPORAL GRAPH) =====
+    memory[e.src] = hu_new.detach().squeeze(0)
+    memory[e.dst] = hv_new.detach().squeeze(0)
 
-        temporal_decay(e.src, t)
-        temporal_decay(e.dst, t)
+    neighbors[e.src].append(hv_new.detach().squeeze(0))
+    neighbors[e.dst].append(hu_new.detach().squeeze(0))
 
-        hu = memory[e.src].unsqueeze(0)
-        hv = memory[e.dst].unsqueeze(0)
-
-        neigh_u = aggregate(e.src, hu)
-        neigh_v = aggregate(e.dst, hv)
-
-        x = torch.from_numpy(e.x).float().unsqueeze(0).to(device)
-
-        # fraud prediction from node embedding
-        fraud_logit = tgnn.predict(hu,x)
-        prob = torch.sigmoid(fraud_logit).item()
-
-        y_true.append(e.y)
-        y_pred.append(prob)
+    last_update[e.src] = t
+    last_update[e.dst] = t
 
 # ================= THRESHOLD SEARCH =================
 best_f1 = 0
